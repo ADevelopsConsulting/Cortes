@@ -8,6 +8,7 @@ const App = () => {
     const [progress, setProgress] = useState(0);
     const [status, setStatus] = useState('Iniciando processamento...');
     const [processedFileUrl, setProcessedFileUrl] = useState(null);
+    const [segments, setSegments] = useState([]); // Store segments with URLs and metadata
     const videoRef = useRef(null);
     const mediaRecorderRef = useRef(null);
     const recordedChunksRef = useRef([]);
@@ -82,7 +83,7 @@ const App = () => {
             mediaRecorder.onstop = () => {
                 const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
                 video.pause();
-                resolve(blob);
+                resolve({ blob, startTime, duration });
             };
 
             mediaRecorder.start();
@@ -124,31 +125,36 @@ const App = () => {
             } else if (newProgress <= 90) {
                 setStatus('Compilando clipe final...');
             } else {
-                setStatus('Finalizando...');
+                setStatus('Processamento concluído!');
             }
         };
 
         updateProgress(); // Step 1: Analysis
 
         // Extract segments around key moments
-        const segments = [];
+        const extractedSegments = [];
         for (let i = 0; i < keyMoments.length; i++) {
             const startTime = Math.max(0, keyMoments[i] - segmentDuration / 2);
             const adjustedDuration = Math.min(segmentDuration, videoDuration - startTime);
-            const segmentBlob = await extractSegment(startTime, adjustedDuration);
-            segments.push(segmentBlob);
+            const segmentData = await extractSegment(startTime, adjustedDuration);
+            const segmentUrl = URL.createObjectURL(segmentData.blob);
+            extractedSegments.push({
+                url: segmentUrl,
+                startTime: segmentData.startTime,
+                duration: segmentData.duration,
+            });
             updateProgress(); // Step for each segment
         }
 
         // Combine segments into a final clip (1–3 minutes)
-        let totalDuration = segments.length * segmentDuration;
-        let finalSegments = segments;
+        let totalDuration = extractedSegments.length * segmentDuration;
+        let finalSegments = extractedSegments;
         if (totalDuration < 60) {
             // If total duration is less than 1 minute, repeat segments to reach at least 1 minute
             const repeatCount = Math.ceil(60 / totalDuration);
             finalSegments = [];
             for (let i = 0; i < repeatCount; i++) {
-                finalSegments.push(...segments);
+                finalSegments.push(...extractedSegments);
             }
             totalDuration = finalSegments.length * segmentDuration;
         }
@@ -159,14 +165,14 @@ const App = () => {
             totalDuration = finalSegments.length * segmentDuration;
         }
 
-        // Combine all segments into a single blob (simplified by using the first segment for demo purposes)
-        // In a real app, you'd concatenate video streams properly using a library or backend
-        const finalBlob = new Blob(finalSegments, { type: 'video/webm' });
+        // Combine all segments into a single blob for download
+        const finalBlobs = finalSegments.map((seg) => seg.blob);
+        const finalBlob = new Blob(finalBlobs, { type: 'video/webm' });
         const finalUrl = URL.createObjectURL(finalBlob);
         setProcessedFileUrl(finalUrl);
+        setSegments(finalSegments); // Store segments for preview
 
         updateProgress(); // Final step: Compilation
-        setStatus('Processamento concluído!');
     };
 
     const closeModal = () => {
@@ -177,6 +183,8 @@ const App = () => {
             URL.revokeObjectURL(processedFileUrl);
             setProcessedFileUrl(null);
         }
+        segments.forEach((seg) => URL.revokeObjectURL(seg.url)); // Clean up segment URLs
+        setSegments([]);
         recordedChunksRef.current = [];
     };
 
@@ -192,6 +200,13 @@ const App = () => {
         } else {
             alert('Nenhum arquivo processado disponível para download.');
         }
+    };
+
+    // Format timestamp for display (e.g., 125 seconds -> 02:05)
+    const formatTimestamp = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
     return (
@@ -362,7 +377,7 @@ const App = () => {
             {/* Modal */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg p-8 max-w-md w-full text-center relative">
+                    <div className="bg-white rounded-lg p-8 max-w-3xl w-full text-center relative overflow-y-auto max-h-[80vh]">
                         <span
                             className="absolute top-4 right-4 text-2xl cursor-pointer text-gray-600"
                             onClick={closeModal}
@@ -378,13 +393,32 @@ const App = () => {
                         </div>
                         <p className="text-sm text-gray-600 mt-2">{Math.round(progress)}%</p>
                         <p className="text-gray-600 mt-4">{status}</p>
-                        {progress >= 100 && (
-                            <button
-                                className="mt-6 bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-indigo-600 transition-all"
-                                onClick={handleDownload}
-                            >
-                                Baixar cortes
-                            </button>
+
+                        {progress >= 100 && segments.length > 0 && (
+                            <div className="mt-6">
+                                <h3 className="text-xl font-semibold text-gray-800 mb-4">Cortes Realizados</h3>
+                                <div className="space-y-4">
+                                    {segments.map((segment, index) => (
+                                        <div key={index} className="border rounded-lg p-4 bg-gray-50">
+                                            <p className="text-gray-700 mb-2">
+                                                <strong>Segmento {index + 1}</strong>: Início em {formatTimestamp(segment.startTime)}, Duração: {formatTimestamp(segment.duration)}
+                                            </p>
+                                            <video
+                                                src={segment.url}
+                                                controls
+                                                className="w-full rounded-lg"
+                                                style={{ maxHeight: '200px' }}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                                <button
+                                    className="mt-6 bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-indigo-600 transition-all"
+                                    onClick={handleDownload}
+                                >
+                                    Baixar clipe final
+                                </button>
+                            </div>
                         )}
                     </div>
                 </div>
