@@ -7,6 +7,7 @@ const App = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [progress, setProgress] = useState(0);
     const [status, setStatus] = useState('Iniciando processamento...');
+    const [processedFileUrl, setProcessedFileUrl] = useState(null);
 
     const handleFileSelect = (selectedFile) => {
         if (selectedFile.type.startsWith('video/')) {
@@ -59,6 +60,10 @@ const App = () => {
                     clearInterval(interval);
                     setTimeout(() => {
                         setStatus('Processamento concluído!');
+                        // Since this is a prototype, we use the original file as the "processed" file.
+                        // In a real application, this would be the URL or blob of the actual processed video.
+                        const processedUrl = URL.createObjectURL(file);
+                        setProcessedFileUrl(processedUrl);
                     }, 1000);
                     return 100;
                 }
@@ -71,6 +76,25 @@ const App = () => {
         setIsModalOpen(false);
         setProgress(0);
         setStatus('Iniciando processamento...');
+        // Clean up the URL object to avoid memory leaks
+        if (processedFileUrl) {
+            URL.revokeObjectURL(processedFileUrl);
+            setProcessedFileUrl(null);
+        }
+    };
+
+    const handleDownload = () => {
+        if (processedFileUrl) {
+            const link = document.createElement('a');
+            link.href = processedFileUrl;
+            link.download = `processed_${file.name}`; // Name the downloaded file
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            closeModal();
+        } else {
+            alert('Nenhum arquivo processado disponível para download.');
+        }
     };
 
     return (
@@ -260,10 +284,7 @@ const App = () => {
                         {progress >= 100 && (
                             <button
                                 className="mt-6 bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-indigo-600 transition-all"
-                                onClick={() => {
-                                    alert('Em um site real, isto iniciaria o download do vídeo processado. Como este é apenas um protótipo, o download não está disponível.');
-                                    closeModal();
-                                }}
+                                onClick={handleDownload}
                             >
                                 Baixar cortes
                             </button>
